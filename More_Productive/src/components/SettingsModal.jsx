@@ -1,6 +1,32 @@
-import React, { useState } from 'react';
-import { Settings, User, Users, Sun, Moon, LogOut, CheckCircle2, XCircle, Clock, Plus, X, ShieldCheck } from 'lucide-react';
-import { loadUsers, saveUsers, getUserSchedule, getStatusColorByHour, getTomorrowDateStr, formatDateStr } from '../utils/storage';
+import React, { useState, useEffect } from 'react';
+import {
+  Settings,
+  User,
+  Users,
+  Sun,
+  Moon,
+  LogOut,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Plus,
+  X,
+  ShieldCheck,
+  KeyRound,
+  Save,
+  AlertCircle,
+  Eye,
+  EyeOff
+} from 'lucide-react';
+import {
+  loadUsers,
+  saveUsers,
+  getUserSchedule,
+  getStatusColorByHour,
+  getTomorrowDateStr,
+  formatDateStr,
+  updateUser
+} from '../utils/storage';
 
 export default function SettingsModal({
   isOpen,
@@ -9,20 +35,48 @@ export default function SettingsModal({
   theme,
   onToggleTheme,
   onLogout,
+  onUpdateUser,
   currentHour,
   tomorrowDateStr
 }) {
   const [activeTab, setActiveTab] = useState('friends'); // 'friends', 'appearance', 'account'
   const [friendUsernameInput, setFriendUsernameInput] = useState('');
-  const [friendsList, setFriendsList] = useState(() => {
-    // Get other users as default friends
-    const users = loadUsers();
-    return users.filter(u => u.id !== currentUser.id);
-  });
-  const [successMsg, setSuccessMsg] = useState('');
+  const [friendsList, setFriendsList] = useState([]);
+  const [friendSuccessMsg, setFriendSuccessMsg] = useState('');
+
+  // Name edit state
+  const [nameInput, setNameInput] = useState('');
+  const [nameMsg, setNameMsg] = useState('');
+  const [nameError, setNameError] = useState('');
+
+  // Password change state
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
+  // Refresh data whenever modal opens or currentUser changes
+  useEffect(() => {
+    if (isOpen && currentUser) {
+      const users = loadUsers();
+      setFriendsList(users.filter(u => u.id !== currentUser.id));
+      setNameInput(currentUser.name || '');
+      setNameMsg('');
+      setNameError('');
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+      setPasswordMsg('');
+      setPasswordError('');
+      setShowPasswords(false);
+    }
+  }, [isOpen, currentUser]);
 
   if (!isOpen) return null;
 
+  // Add friend handler
   const handleAddFriend = (e) => {
     e.preventDefault();
     if (!friendUsernameInput.trim()) return;
@@ -42,8 +96,75 @@ export default function SettingsModal({
     }
     setFriendsList(prev => [...prev, found]);
     setFriendUsernameInput('');
-    setSuccessMsg(`@${found.username} をフレンドに追加しました！`);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    setFriendSuccessMsg(`@${found.username} をフレンドに追加しました！`);
+    setTimeout(() => setFriendSuccessMsg(''), 3000);
+  };
+
+  // Name change handler
+  const handleSaveName = (e) => {
+    e.preventDefault();
+    setNameError('');
+    setNameMsg('');
+
+    const trimmed = nameInput.trim();
+    if (!trimmed) {
+      setNameError('名前（表示名）を入力してください');
+      return;
+    }
+
+    const updated = { ...currentUser, name: trimmed };
+    updateUser(updated);
+    if (onUpdateUser) {
+      onUpdateUser(updated);
+    }
+    setNameMsg('名前を変更しました！');
+    setTimeout(() => setNameMsg(''), 3000);
+  };
+
+  // Password change handler
+  const handleChangePassword = (e) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordMsg('');
+
+    const actualPassword = currentUser.password || '123';
+
+    if (!currentPasswordInput) {
+      setPasswordError('現在のパスワードを入力してください');
+      return;
+    }
+    if (currentPasswordInput !== actualPassword) {
+      setPasswordError('現在のパスワードが間違っています');
+      return;
+    }
+    if (!newPasswordInput) {
+      setPasswordError('新しいパスワードを入力してください');
+      return;
+    }
+    if (newPasswordInput.length < 3) {
+      setPasswordError('新しいパスワードは3文字以上で入力してください');
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordError('新しいパスワード（確認用）が一致しません');
+      return;
+    }
+    if (newPasswordInput === actualPassword) {
+      setPasswordError('新しいパスワードが現在のパスワードと同じです');
+      return;
+    }
+
+    const updated = { ...currentUser, password: newPasswordInput };
+    updateUser(updated);
+    if (onUpdateUser) {
+      onUpdateUser(updated);
+    }
+
+    setCurrentPasswordInput('');
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setPasswordMsg('パスワードを変更しました！次回から新しいパスワードでログインできます。');
+    setTimeout(() => setPasswordMsg(''), 4000);
   };
 
   const statusInfo = getStatusColorByHour(currentHour);
@@ -113,9 +234,9 @@ export default function SettingsModal({
                 </button>
               </form>
 
-              {successMsg && (
+              {friendSuccessMsg && (
                 <div style={{ fontSize: '0.8rem', color: 'var(--status-green)', padding: '6px 12px', background: 'rgba(16,185,129,0.1)', borderRadius: '6px' }}>
-                  {successMsg}
+                  {friendSuccessMsg}
                 </div>
               )}
 
@@ -149,7 +270,7 @@ export default function SettingsModal({
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           <div className="avatar-circle">
-                            {friend.name.charAt(0)}
+                            {friend.name ? friend.name.charAt(0) : '?'}
                           </div>
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{friend.name}</div>
@@ -242,24 +363,224 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* Tab 3: Account */}
+          {/* Tab 3: Account (Name Settings & Password Change) */}
           {activeTab === 'account' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ background: 'var(--bg-input)', padding: '16px', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div className="avatar-circle" style={{ width: '48px', height: '48px', fontSize: '1.2rem' }}>
-                  {currentUser.name.charAt(0)}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Account Overview Header */}
+              <div style={{
+                background: 'var(--bg-input)',
+                padding: '16px',
+                borderRadius: '12px',
+                border: '1px solid var(--glass-border)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '16px'
+              }}>
+                <div className="avatar-circle" style={{ width: '52px', height: '52px', fontSize: '1.3rem' }}>
+                  {currentUser.name ? currentUser.name.charAt(0) : '?'}
                 </div>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{currentUser.name}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>ユーザー名: @{currentUser.username}</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{currentUser.name}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>ユーザーID: @{currentUser.username}</div>
                 </div>
               </div>
 
-              <div style={{ marginTop: '10px' }}>
+              {/* Section 1: Change Display Name */}
+              <div style={{
+                background: 'var(--bg-card)',
+                padding: '18px',
+                borderRadius: '12px',
+                border: '1px solid var(--glass-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.95rem' }}>
+                  <User size={18} className="text-indigo-400" />
+                  <span>お名前（表示名）の設定</span>
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  アプリ内やフレンド一覧に表示されるお名前を設定・変更できます。
+                </div>
+
+                {nameMsg && (
+                  <div style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--status-green)',
+                    padding: '8px 12px',
+                    background: 'rgba(16,185,129,0.12)',
+                    border: '1px solid rgba(16,185,129,0.3)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <CheckCircle2 size={16} />
+                    <span>{nameMsg}</span>
+                  </div>
+                )}
+
+                {nameError && (
+                  <div style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--status-red)',
+                    padding: '8px 12px',
+                    background: 'rgba(239,68,68,0.12)',
+                    border: '1px solid rgba(239,68,68,0.3)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <AlertCircle size={16} />
+                    <span>{nameError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveName} style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="例: 山田 太郎"
+                    style={{ flex: 1 }}
+                    required
+                  />
+                  <button type="submit" className="btn btn-primary btn-sm" style={{ whiteSpace: 'nowrap' }}>
+                    <Save size={16} />
+                    <span>名前を保存</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Section 2: Change Password */}
+              <div style={{
+                background: 'var(--bg-card)',
+                padding: '18px',
+                borderRadius: '12px',
+                border: '1px solid var(--glass-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.95rem' }}>
+                    <KeyRound size={18} className="text-amber-400" />
+                    <span>パスワードの変更</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords(!showPasswords)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    {showPasswords ? <EyeOff size={14} /> : <Eye size={14} />}
+                    <span>{showPasswords ? '伏字にする' : 'パスワードを表示'}</span>
+                  </button>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  ログインに使用するパスワードを変更します。（初期パスワード: <code>123</code>）
+                </div>
+
+                {passwordMsg && (
+                  <div style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--status-green)',
+                    padding: '8px 12px',
+                    background: 'rgba(16,185,129,0.12)',
+                    border: '1px solid rgba(16,185,129,0.3)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <CheckCircle2 size={16} />
+                    <span>{passwordMsg}</span>
+                  </div>
+                )}
+
+                {passwordError && (
+                  <div style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--status-red)',
+                    padding: '8px 12px',
+                    background: 'rgba(239,68,68,0.12)',
+                    border: '1px solid rgba(239,68,68,0.3)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <AlertCircle size={16} />
+                    <span>{passwordError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="form-group">
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>現在のパスワード</label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      className="form-input"
+                      value={currentPasswordInput}
+                      onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                      placeholder="現在のパスワードを入力"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>新しいパスワード</label>
+                      <input
+                        type={showPasswords ? 'text' : 'password'}
+                        className="form-input"
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder="新しいパスワード (3文字以上)"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>新しいパスワード（確認用）</label>
+                      <input
+                        type={showPasswords ? 'text' : 'password'}
+                        className="form-input"
+                        value={confirmPasswordInput}
+                        onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                        placeholder="もう一度入力"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-secondary btn-sm"
+                    style={{ alignSelf: 'flex-start', marginTop: '4px' }}
+                  >
+                    <KeyRound size={16} />
+                    <span>パスワードを更新する</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Section 3: Logout */}
+              <div style={{ marginTop: '6px', paddingTop: '14px', borderTop: '1px solid var(--glass-border)' }}>
                 <button
                   type="button"
                   className="btn btn-danger"
-                  style={{ width: '100%' }}
+                  style={{ width: '100%', padding: '12px' }}
                   onClick={() => {
                     onLogout();
                     onClose();

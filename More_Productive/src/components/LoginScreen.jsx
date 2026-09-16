@@ -6,6 +6,7 @@ export default function LoginScreen({ onLoginSuccess }) {
   const users = loadUsers();
   const [selectedUserId, setSelectedUserId] = useState(users[0]?.id || 'u1');
   const [password, setPassword] = useState('123');
+  const [displayNameInput, setDisplayNameInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -16,8 +17,12 @@ export default function LoginScreen({ onLoginSuccess }) {
     setErrorMsg('');
 
     if (isRegisterMode) {
+      if (!displayNameInput.trim()) {
+        setErrorMsg('お名前（表示名）を入力してください');
+        return;
+      }
       if (!usernameInput.trim()) {
-        setErrorMsg('ユーザー名を入力してください');
+        setErrorMsg('ユーザー名（ID）を入力してください');
         return;
       }
       const existing = users.find(u => u.username.toLowerCase() === usernameInput.toLowerCase());
@@ -28,7 +33,7 @@ export default function LoginScreen({ onLoginSuccess }) {
       const newUser = {
         id: `u_${Date.now()}`,
         username: usernameInput.trim(),
-        name: usernameInput.trim(),
+        name: displayNameInput.trim(),
         password: newPasswordInput || '123'
       };
       const updatedUsers = [...users, newUser];
@@ -120,13 +125,25 @@ export default function LoginScreen({ onLoginSuccess }) {
           ) : (
             <>
               <div className="form-group">
-                <label className="form-label">新規ユーザー名</label>
+                <label className="form-label">お名前（表示名）</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={displayNameInput}
+                  onChange={(e) => setDisplayNameInput(e.target.value)}
+                  placeholder="例: 山田 太郎"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">ユーザー名（半角英数ID）</label>
                 <input
                   type="text"
                   className="form-input"
                   value={usernameInput}
                   onChange={(e) => setUsernameInput(e.target.value)}
-                  placeholder="例: charlie"
+                  placeholder="例: taro_yamada"
                   required
                 />
               </div>
@@ -138,8 +155,11 @@ export default function LoginScreen({ onLoginSuccess }) {
                   className="form-input"
                   value={newPasswordInput}
                   onChange={(e) => setNewPasswordInput(e.target.value)}
-                  placeholder="パスワード"
+                  placeholder="パスワードを入力 (未入力の場合は 123)"
                 />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  ※ ログイン後、いつでも設定画面から変更可能です
+                </span>
               </div>
             </>
           )}

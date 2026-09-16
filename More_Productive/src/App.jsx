@@ -57,6 +57,10 @@ export default function App() {
     setCurrentUser(null);
   };
 
+  const handleUpdateUser = (updatedUser) => {
+    setCurrentUser(updatedUser);
+  };
+
   // Real-time clock ticker
   const [now, setNow] = useState(new Date());
 
@@ -285,6 +289,7 @@ export default function App() {
             setIsScheduleModalOpen(true);
           }}
           onDeleteTask={handleDeleteTask}
+          isToday={activeTab === 'today'}
         />
       </main>
 
@@ -296,6 +301,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onLogout={handleLogout}
+        onUpdateUser={handleUpdateUser}
         currentHour={currentHour}
         tomorrowDateStr={tomorrowDateStr}
       />

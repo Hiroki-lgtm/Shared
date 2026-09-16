@@ -15,11 +15,22 @@ export function saveTheme(theme) {
   localStorage.setItem(STORAGE_KEYS.THEME, theme);
 }
 
-// Default Users (Default 2 users for instant pairing test)
+// Default Users (Customizable display names)
 export const DEFAULT_USERS = [
-  { id: 'u1', username: 'alice', name: 'あなた (Alice)', password: '123' },
-  { id: 'u2', username: 'bob', name: 'パートナー (Bob)', password: '123' }
+  { id: 'u1', username: 'alice', name: 'Alice', password: '123' },
+  { id: 'u2', username: 'bob', name: 'Bob', password: '123' }
 ];
+
+// Helper to sanitize legacy default names from older storage
+function sanitizeUser(u) {
+  if (!u) return u;
+  let name = u.name;
+  if (name === 'あなた (Alice)') name = 'Alice';
+  else if (name === 'パートナー (Bob)') name = 'Bob';
+  else if (name && /^あなた\s*\(/.test(name)) name = name.replace(/^あなた\s*\((.*)\)$/, '$1');
+  else if (name && /^パートナー\s*\(/.test(name)) name = name.replace(/^パートナー\s*\((.*)\)$/, '$1');
+  return { ...u, name: name || u.username };
+}
 
 // Helper: Format date string YYYY-MM-DD
 export function formatDateStr(date = new Date()) {
@@ -91,7 +102,17 @@ export function loadUsers() {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
     return DEFAULT_USERS;
   }
-  return JSON.parse(data);
+  try {
+    const rawUsers = JSON.parse(data);
+    const sanitized = rawUsers.map(sanitizeUser);
+    // If any user was updated by sanitization, persist back
+    if (JSON.stringify(rawUsers) !== JSON.stringify(sanitized)) {
+      saveUsers(sanitized);
+    }
+    return sanitized;
+  } catch (err) {
+    return DEFAULT_USERS;
+  }
 }
 
 export function saveUsers(users) {
@@ -101,11 +122,32 @@ export function saveUsers(users) {
 export function loadCurrentUser() {
   const data = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
   if (!data) return DEFAULT_USERS[0];
-  return JSON.parse(data);
+  try {
+    const raw = JSON.parse(data);
+    const sanitized = sanitizeUser(raw);
+    if (JSON.stringify(raw) !== JSON.stringify(sanitized)) {
+      saveCurrentUser(sanitized);
+    }
+    return sanitized;
+  } catch (err) {
+    return DEFAULT_USERS[0];
+  }
 }
 
 export function saveCurrentUser(user) {
   localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+}
+
+// Update single user (e.g. name, password) in storage
+export function updateUser(updatedUser) {
+  const users = loadUsers();
+  const nextUsers = users.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u);
+  saveUsers(nextUsers);
+  const current = loadCurrentUser();
+  if (current && current.id === updatedUser.id) {
+    saveCurrentUser({ ...current, ...updatedUser });
+  }
+  return updatedUser;
 }
 
 export function loadSchedules() {

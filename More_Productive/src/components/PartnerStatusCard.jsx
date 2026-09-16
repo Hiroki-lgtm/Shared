@@ -10,7 +10,7 @@ export default function PartnerStatusCard({ currentUser, currentHour, tomorrowDa
     return (
       <div className="glass-panel">
         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          パートナーアカウントを追加すると、翌日予定の作成ステータスがリアルタイム表示されます。
+          フレンドアカウントを追加すると、翌日予定の作成ステータスがリアルタイム表示されます。
         </div>
       </div>
     );
@@ -29,7 +29,7 @@ export default function PartnerStatusCard({ currentUser, currentHour, tomorrowDa
       <div className="stat-header" style={{ marginBottom: '14px' }}>
         <div className="stat-title">
           <User className="text-indigo-400" size={18} />
-          <span>パートナーの翌日予定ステータス</span>
+          <span>{partner.name} の翌日予定ステータス</span>
         </div>
         {/* Status Badge according to the rule */}
         <div className={`status-badge ${statusInfo.color}`}>
