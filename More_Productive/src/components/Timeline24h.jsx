@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Zap, Clock, Calendar } from 'lucide-react';
-import { CATEGORIES, timeToMinutes } from '../utils/storage';
+import { Plus, Edit2, Trash2, Zap, Clock, Move } from 'lucide-react';
+import { CATEGORIES, timeToMinutes, minutesToTime } from '../utils/storage';
 
 const HOUR_HEIGHT = 60; // 60px per hour = 1px per minute
 const TOTAL_HEIGHT = 24 * HOUR_HEIGHT; // 1440px for 24 hours
@@ -8,7 +8,7 @@ const TOTAL_HEIGHT = 24 * HOUR_HEIGHT; // 1440px for 24 hours
 /**
  * Calculates positioning (top, height, left, width) for each task
  * while handling multi-hour spans, short tasks (with minHeight),
- * overnight tasks, and overlapping tasks side-by-side.
+ * overnight tasks (e.g., 23:00 - 07:00), and overlapping tasks side-by-side.
  */
 function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
   if (!tasks || tasks.length === 0) return [];
@@ -19,17 +19,19 @@ function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
     let endM = timeToMinutes(task.endTime);
     let isOvernight = false;
 
-    // Handle overnight schedules (e.g., 23:00 - 07:00)
+    // Handle overnight schedules (e.g., 23:00 - 07:00 = 8 hours)
     if (endM <= startM) {
       isOvernight = true;
-      endM = 24 * 60; // Clamp to 24:00 boundary for today's visual canvas
+      endM = 24 * 60; // Clamp visually to 24:00 for today's board
     }
 
-    const durationMinutes = endM - startM;
+    const durationMinutes = isOvernight
+      ? (24 * 60 - startM) + timeToMinutes(task.endTime)
+      : endM - startM;
+
     const top = (startM / 60) * hourHeight;
-    const rawHeight = (durationMinutes / 60) * hourHeight;
-    // Provide a comfortable minimum height (26px) so short tasks (e.g. 5m breaks) remain readable
-    const height = Math.max(26, rawHeight);
+    const rawHeight = ((endM - startM) / 60) * hourHeight;
+    const height = Math.max(28, rawHeight);
 
     return {
       task,
@@ -43,10 +45,10 @@ function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
     };
   });
 
-  // Sort tasks by start time ascending, then by duration descending
+  // Sort tasks by start time ascending
   parsed.sort((a, b) => a.startM - b.startM || b.durationMinutes - a.durationMinutes);
 
-  // Group into clusters of tasks that visually overlap
+  // Group into clusters of overlapping tasks
   const clusters = [];
   let currentCluster = [];
   let clusterEndM = 0;
@@ -56,11 +58,9 @@ function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
       currentCluster.push(item);
       clusterEndM = Math.max(item.endM, item.visualEndM);
     } else if (item.startM < clusterEndM) {
-      // Overlaps with the current cluster
       currentCluster.push(item);
       clusterEndM = Math.max(clusterEndM, item.endM, item.visualEndM);
     } else {
-      // Start a new cluster
       clusters.push(currentCluster);
       currentCluster = [item];
       clusterEndM = Math.max(item.endM, item.visualEndM);
@@ -70,11 +70,10 @@ function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
     clusters.push(currentCluster);
   }
 
-  // Assign columns for side-by-side rendering in overlapping clusters
+  // Assign columns for side-by-side layout
   const result = [];
   clusters.forEach(cluster => {
-    const columns = []; // tracks the end time for each column
-
+    const columns = [];
     cluster.forEach(item => {
       let colIndex = -1;
       for (let i = 0; i < columns.length; i++) {
@@ -108,9 +107,10 @@ function computeTaskLayout(tasks, hourHeight = HOUR_HEIGHT) {
   return result;
 }
 
-export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask, isToday = true }) {
-  // Real-time minute ticker for the live indicator line
+export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask, onSaveTask, onMoveTask, isToday = true }) {
+  // Real-time minute ticker for live line
   const [now, setNow] = useState(new Date());
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -127,8 +127,13 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
   const totalMinutes = sortedTasks.reduce((acc, t) => {
     const start = timeToMinutes(t.startTime);
     let end = timeToMinutes(t.endTime);
-    if (end < start) end += 24 * 60; // Handle overnight
-    return acc + Math.max(0, end - start);
+    let duration = 0;
+    if (end <= start) {
+      duration = (24 * 60 - start) + end; // Overnight task duration
+    } else {
+      duration = end - start;
+    }
+    return acc + Math.max(0, duration);
   }, 0);
 
   const totalHoursFormatted = (totalMinutes / 60).toFixed(1);
@@ -137,8 +142,91 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
   // Compute exact coordinates for each task card
   const layoutItems = computeTaskLayout(tasks, HOUR_HEIGHT);
 
+  // Cut & Paste Drag and drop handlers
+  const handleDragStart = (e, taskId) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const grabOffsetMinutes = Math.round(e.clientY - rect.top);
+    
+    // Store both taskId and the offset where the user grabbed the task
+    const payload = JSON.stringify({ taskId, grabOffsetMinutes });
+    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.setData('text/plain', taskId); // Fallback
+
+    setTimeout(() => {
+      setIsDragging(true);
+    }, 0);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDropSlot = (e, targetHour) => {
+    e.preventDefault();
+    
+    let taskId, grabOffsetMinutes = 0;
+    const payloadStr = e.dataTransfer.getData('application/json');
+    if (payloadStr) {
+      try {
+        const payload = JSON.parse(payloadStr);
+        taskId = payload.taskId;
+        grabOffsetMinutes = payload.grabOffsetMinutes || 0;
+      } catch (err) {
+        taskId = e.dataTransfer.getData('text/plain');
+      }
+    } else {
+      taskId = e.dataTransfer.getData('text/plain');
+    }
+
+    if (!taskId) return;
+
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    let origDuration = timeToMinutes(task.endTime) - timeToMinutes(task.startTime);
+    if (origDuration <= 0) {
+      origDuration = (24 * 60 - timeToMinutes(task.startTime)) + timeToMinutes(task.endTime);
+    }
+    if (origDuration <= 0) origDuration = 60;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dropY = e.clientY - rect.top;
+    
+    // Calculate the absolute minute of the cursor drop position
+    const cursorTimeMinutes = targetHour * 60 + Math.round(dropY);
+    
+    // Subtract the offset where the user grabbed the task to find the exact new start time
+    const exactNewStartM = cursorTimeMinutes - grabOffsetMinutes;
+    
+    // Snap to the nearest 30 minutes for predictable drop targets
+    const remainder = exactNewStartM % 30;
+    let snappedNewStartM = exactNewStartM - remainder + (remainder >= 15 ? 30 : 0);
+    
+    // Ensure the start time is within bounds
+    if (snappedNewStartM < 0) snappedNewStartM = 0;
+
+    const newStartM = snappedNewStartM;
+    let newEndM = newStartM + origDuration;
+    if (newEndM >= 1440) newEndM = newEndM % 1440;
+
+    // Move task to new start/end time (Cut & Paste)
+    const updated = {
+      ...task,
+      startTime: minutesToTime(newStartM),
+      endTime: minutesToTime(newEndM)
+    };
+    onMoveTask(task, newStartM, newEndM);
+    setIsDragging(false);
+  };
+
   return (
-    <div className="timeline-container">
+    <div className={`timeline-container ${isDragging ? 'is-dragging' : ''}`}>
       {/* Coverage Progress Bar Header */}
       <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '8px' }}>
         <div className="timeline-meta">
@@ -182,7 +270,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
 
         {/* Right Timeline Canvas (Background Grid + Overlay Task Blocks) */}
         <div className="timeline-canvas" style={{ height: `${TOTAL_HEIGHT}px` }}>
-          {/* Background Hour Grid Slots */}
+          {/* Background Hour Grid Slots (Drop targets for Cut & Paste drag) */}
           {Array.from({ length: 24 }).map((_, hour) => {
             const timeLabel = `${String(hour).padStart(2, '0')}:00`;
             return (
@@ -194,6 +282,8 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                   height: `${HOUR_HEIGHT}px`
                 }}
                 onClick={() => onAddSlot(timeLabel)}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDropSlot(e, hour)}
               >
                 {/* 30-minute faint guideline */}
                 <div className="timeline-half-hour-line" />
@@ -218,7 +308,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
           {/* Bottom Boundary Line for 24:00 */}
           <div className="timeline-end-line" style={{ top: `${TOTAL_HEIGHT}px` }} />
 
-          {/* Live Current Time Indicator Line (Only on today's view) */}
+          {/* Live Current Time Indicator Line */}
           {isToday && nowMinutes >= 0 && nowMinutes <= 1440 && (
             <div
               className="timeline-now-line"
@@ -235,11 +325,11 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
           <div className="timeline-tasks-layer">
             {layoutItems.map(({ task, top, height, left, width, durationMinutes, isOvernight }) => {
               const cat = CATEGORIES.find(c => c.id === task.category) || CATEGORIES[6];
-              const isTall = height >= 70; // 70px+ has spacious room for title + badges + time
+              const isTall = height >= 70;
               const isMedium = height >= 45 && height < 70;
               const isCompact = height < 45;
 
-              // Format duration string (e.g. 3.0時間 or 25分)
+              // Format duration string
               const hours = Math.floor(durationMinutes / 60);
               const mins = durationMinutes % 60;
               let durationLabel = '';
@@ -254,22 +344,27 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
               return (
                 <div
                   key={task.id}
+                  draggable={true}
+                  onDragStart={(e) => handleDragStart(e, task.id)}
+                  onDragEnd={handleDragEnd}
                   className={`timeline-task-block ${cat.color} ${isCompact ? 'compact' : ''} ${isTall ? 'tall' : ''}`}
                   style={{
                     top: `${top}px`,
                     height: `${height}px`,
                     left,
-                    width
+                    width,
+                    cursor: 'grab'
                   }}
                   onClick={() => onEditTask(task)}
                 >
                   {isTall ? (
-                    /* Spacious layout for multi-hour tasks (e.g. 09:00 - 12:00, 3 hours) */
+                    /* Spacious layout for multi-hour tasks */
                     <div className="task-block-content tall-content">
                       <div className="task-block-header">
-                        <div className="task-time-badge">
-                          {task.startTime} - {task.endTime}
-                          {isOvernight && <span className="overnight-tag">🌙 翌日</span>}
+                        <div className="task-time-badge" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Move size={12} style={{ opacity: 0.7 }} title="ドラッグで別の時間へ移動" />
+                          <span>{task.startTime} - {task.endTime}</span>
+                          {isOvernight && <span className="overnight-tag">🌙 翌日{task.endTime}まで</span>}
                         </div>
                         <span className="task-duration-badge">{durationLabel}</span>
                         <span className="task-category-badge">{cat.name}</span>
@@ -279,7 +374,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                             type="button"
                             className="task-action-btn"
                             onClick={() => onEditTask(task)}
-                            title="予定の編集"
+                            title="編集"
                           >
                             <Edit2 size={13} />
                           </button>
@@ -287,7 +382,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                             type="button"
                             className="task-action-btn danger"
                             onClick={() => onDeleteTask(task.id)}
-                            title="予定の削除"
+                            title="削除"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -301,34 +396,29 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                         <h4 className="task-block-title">{task.title}</h4>
                       </div>
 
-                      {height >= 110 && (
-                        <div className="task-block-footer">
-                          <span className="task-block-span-hint">
-                            ⏱ {task.startTime} 〜 {task.endTime} 枠全体（{durationLabel}）を確保
-                          </span>
-                        </div>
-                      )}
+                      {/* Removed text hint per user request */}
                     </div>
                   ) : isMedium ? (
-                    /* Medium layout for 45m - 1h tasks */
+                    /* Medium layout */
                     <div className="task-block-content medium-content">
                       <div className="task-block-row">
-                        <div className="task-time-badge">
-                          {task.startTime} - {task.endTime}
+                        <div className="task-time-badge" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Move size={11} style={{ opacity: 0.7 }} />
+                          <span>{task.startTime} - {task.endTime}</span>
+                          {isOvernight && <span className="overnight-tag">🌙 翌日</span>}
                         </div>
                         <span className="task-duration-badge">{durationLabel}</span>
                         {task.isPomodoro && (
                           <Zap size={14} className="text-emerald-400" title="ポモドーロタスク" />
                         )}
                         <span className="task-block-title">{task.title}</span>
-                        <span className="task-category-badge">{cat.name}</span>
 
                         <div className="task-block-actions" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             className="task-action-btn"
                             onClick={() => onEditTask(task)}
-                            title="予定の編集"
+                            title="編集"
                           >
                             <Edit2 size={12} />
                           </button>
@@ -336,7 +426,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                             type="button"
                             className="task-action-btn danger"
                             onClick={() => onDeleteTask(task.id)}
-                            title="予定の削除"
+                            title="削除"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -344,7 +434,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                       </div>
                     </div>
                   ) : (
-                    /* Compact single-row layout for short 5m - 30m tasks */
+                    /* Compact layout for short tasks */
                     <div className="task-block-content compact-content">
                       <div className="task-block-row compact-row">
                         <span className="task-time-badge compact-time">
@@ -361,7 +451,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                             type="button"
                             className="task-action-btn"
                             onClick={() => onEditTask(task)}
-                            title="予定の編集"
+                            title="編集"
                           >
                             <Edit2 size={11} />
                           </button>
@@ -369,7 +459,7 @@ export default function Timeline24h({ tasks, onAddSlot, onEditTask, onDeleteTask
                             type="button"
                             className="task-action-btn danger"
                             onClick={() => onDeleteTask(task.id)}
-                            title="予定の削除"
+                            title="削除"
                           >
                             <Trash2 size={11} />
                           </button>

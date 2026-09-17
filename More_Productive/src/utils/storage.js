@@ -171,25 +171,52 @@ export function getUserSchedule(userId, dateStr) {
   return schedules[key] || [];
 }
 
+// Get effective schedule including overnight tasks crossing over from yesterday
+export function getEffectiveScheduleForDate(userId, dateStr) {
+  const directTasks = getUserSchedule(userId, dateStr);
+  const yesterdayStr = getYesterdayDateStr(dateStr);
+  const yesterdayTasks = getUserSchedule(userId, yesterdayStr);
+
+  // Find overnight tasks from yesterday (e.g. 23:00 - 07:00)
+  const crossoverTasks = yesterdayTasks
+    .filter(t => {
+      const startM = timeToMinutes(t.startTime);
+      const endM = timeToMinutes(t.endTime);
+      return endM <= startM && endM > 0;
+    })
+    .map(t => ({
+      ...t,
+      id: `crossover_${t.id}`,
+      originalId: t.id,
+      startTime: '00:00',
+      title: `${t.title} (前日${t.startTime}〜)`,
+      isCrossover: true
+    }));
+
+  return [...crossoverTasks, ...directTasks];
+}
+
 // Save user schedule for specific date
 export function saveUserSchedule(userId, dateStr, taskList) {
   const schedules = loadSchedules();
   const key = `${userId}_${dateStr}`;
-  schedules[key] = taskList;
+  // Filter out temporary crossover tasks when saving
+  const cleanTasks = taskList.filter(t => !t.isCrossover);
+  schedules[key] = cleanTasks;
   saveSchedules(schedules);
 }
 
-// Helper: Check status color based on current hour
-// 19:00 - 22:00 -> GREEN ('green')
-// 22:00 - 24:00 -> YELLOW ('yellow')
-// Otherwise -> RED ('red')
-export function getStatusColorByHour(currentHour) {
+export function getStatusColorByHour(currentHour, isCreated = false) {
+  if (isCreated) {
+    return { color: 'green', text: '翌日の予定 作成済み', label: '作成完了' };
+  }
+  
   if (currentHour >= 19 && currentHour < 22) {
-    return { color: 'green', text: '標準入力時間帯 (19:00〜22:00)', label: '緑色 (正常)' };
+    return { color: 'green', text: '標準入力時間帯 (19:00〜22:00)', label: '未作成・入力期間中' };
   } else if (currentHour >= 22 && currentHour < 24) {
-    return { color: 'yellow', text: '締め切り間近 (22:00〜24:00)', label: '黄色 (注意)' };
+    return { color: 'yellow', text: '締め切り間近 (22:00〜24:00)', label: '未作成・締切直前' };
   } else {
-    return { color: 'red', text: '入力時間外 (19時前 / 深夜過剰)', label: '赤色 (制限/締切外)' };
+    return { color: 'red', text: '入力時間外 (〜19:00)', label: '未作成・制限時間外' };
   }
 }
 

@@ -29,11 +29,7 @@ export default function Header({
             <span>過去の記録 📅</span>
           </button>
 
-          {/* Settings Button */}
-          <button className="btn btn-secondary btn-sm" onClick={onOpenSettings} title="設定 (フレンド・テーマ・アカウント)">
-            <Settings size={16} />
-            <span>設定</span>
-          </button>
+
 
           {/* User Account Menu Badge */}
           <div

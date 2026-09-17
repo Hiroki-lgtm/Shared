@@ -12,7 +12,9 @@ import {
   loadCurrentUser,
   saveCurrentUser,
   getUserSchedule,
+  getEffectiveScheduleForDate,
   saveUserSchedule,
+  getYesterdayDateStr,
   formatDateStr,
   getTomorrowDateStr,
   isTomorrowUnlocked,
@@ -103,10 +105,10 @@ export default function App() {
   // 19:00 unlock status for tomorrow
   const canEditTomorrow = isTomorrowUnlocked(currentHour);
 
-  // Load tasks for current user and active date
+  // Load effective tasks (including overnight tasks from yesterday)
   const refreshTasks = () => {
     if (!currentUser) return;
-    const loaded = getUserSchedule(currentUser.id, activeDateStr);
+    const loaded = getEffectiveScheduleForDate(currentUser.id, activeDateStr);
     setTasks(loaded);
   };
 
@@ -139,18 +141,82 @@ export default function App() {
   // Add / Edit Task
   const handleSaveTask = (taskData) => {
     if (editingTask) {
-      const updated = tasks.map(t => t.id === taskData.id ? taskData : t);
-      updateAndSaveTasks(updated);
+      if (editingTask.isCrossover) {
+        // Remove original from yesterday
+        const yesterdayStr = getYesterdayDateStr(activeDateStr);
+        const yesterdayTasks = getUserSchedule(currentUser.id, yesterdayStr);
+        const newYesterdayTasks = yesterdayTasks.filter(t => t.id !== editingTask.originalId);
+        saveUserSchedule(currentUser.id, yesterdayStr, newYesterdayTasks);
+        
+        // Add updated task to today
+        const cleanedTask = { ...taskData };
+        delete cleanedTask.isCrossover;
+        delete cleanedTask.originalId;
+        cleanedTask.id = editingTask.originalId; // keep original ID
+        if (cleanedTask.title.includes('(前日')) {
+          cleanedTask.title = cleanedTask.title.replace(/\s*\(前日.*\)$/, '');
+        }
+        const updated = [...tasks.filter(t => t.id !== editingTask.id), cleanedTask];
+        updateAndSaveTasks(updated);
+      } else {
+        const updated = tasks.map(t => t.id === taskData.id ? taskData : t);
+        updateAndSaveTasks(updated);
+      }
     } else {
       const updated = [...tasks, taskData];
       updateAndSaveTasks(updated);
     }
   };
 
+  // Move Task (Drag & Drop)
+  const handleMoveTask = (task, newStartM, newEndM) => {
+    const updatedTask = {
+      ...task,
+      startTime: `${String(Math.floor(newStartM / 60) % 24).padStart(2, '0')}:${String(newStartM % 60).padStart(2, '0')}`,
+      endTime: `${String(Math.floor(newEndM / 60) % 24).padStart(2, '0')}:${String(newEndM % 60).padStart(2, '0')}`
+    };
+
+    if (task.isCrossover) {
+      // Remove original from yesterday
+      const yesterdayStr = getYesterdayDateStr(activeDateStr);
+      const yesterdayTasks = getUserSchedule(currentUser.id, yesterdayStr);
+      const newYesterdayTasks = yesterdayTasks.filter(t => t.id !== task.originalId);
+      saveUserSchedule(currentUser.id, yesterdayStr, newYesterdayTasks);
+
+      // Add to today
+      delete updatedTask.isCrossover;
+      delete updatedTask.originalId;
+      updatedTask.id = task.originalId;
+      if (updatedTask.title.includes('(前日')) {
+        updatedTask.title = updatedTask.title.replace(/\s*\(前日.*\)$/, '');
+      }
+
+      const updated = [...tasks.filter(t => t.id !== task.id), updatedTask];
+      updateAndSaveTasks(updated);
+    } else {
+      const updated = tasks.map(t => t.id === task.id ? updatedTask : t);
+      updateAndSaveTasks(updated);
+    }
+  };
+
   // Delete Task
   const handleDeleteTask = (taskId) => {
-    const updated = tasks.filter(t => t.id !== taskId);
-    updateAndSaveTasks(updated);
+    const taskToDelete = tasks.find(t => t.id === taskId);
+    if (!taskToDelete) return;
+
+    if (taskToDelete.isCrossover) {
+      // Delete from yesterday
+      const yesterdayStr = getYesterdayDateStr(activeDateStr);
+      const yesterdayTasks = getUserSchedule(currentUser.id, yesterdayStr);
+      const newYesterdayTasks = yesterdayTasks.filter(t => t.id !== taskToDelete.originalId);
+      saveUserSchedule(currentUser.id, yesterdayStr, newYesterdayTasks);
+      
+      const updated = tasks.filter(t => t.id !== taskId);
+      setTasks(updated); // Update local state directly
+    } else {
+      const updated = tasks.filter(t => t.id !== taskId);
+      updateAndSaveTasks(updated);
+    }
   };
 
   // Quick Slot Add
@@ -284,6 +350,8 @@ export default function App() {
         <Timeline24h
           tasks={tasks}
           onAddSlot={handleAddSlot}
+          onSaveTask={handleSaveTask}
+          onMoveTask={handleMoveTask}
           onEditTask={(task) => {
             setEditingTask(task);
             setIsScheduleModalOpen(true);

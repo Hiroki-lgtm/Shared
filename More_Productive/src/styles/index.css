@@ -627,6 +627,11 @@ body {
   z-index: 10;
 }
 
+/* Allow dropping onto empty hour slots even when there are tasks on top */
+.timeline-container.is-dragging .timeline-task-block {
+  pointer-events: none;
+}
+
 .timeline-task-block:hover {
   z-index: 30;
   transform: translateY(-1px);
